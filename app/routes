@@ -1,0 +1,5 @@
+/                   HomeR    GET
+/verse/#VerseId     VerseR   GET
+/page/#PageId       PageR    GET
+/file/#FileId       FileR    GET
+/storage/#Text      StorageR GET
