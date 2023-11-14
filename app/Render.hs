@@ -2,94 +2,96 @@ module Render where
 
 import Data.Entities as ES
 import Data.Text qualified as T
+import Data.Time
 import Foundation
 import Yesod
 
-drawV :: Verse -> Widget
-drawV v = do
+class Drawable a where
+  title :: a -> T.Text
+  timestamp :: a -> UTCTime
+  route :: Entity a -> Route BookShelf
+  drawContent :: a -> Widget
+  drawSummary :: a -> Widget
+  drawSummary = drawContent
+
+-- Is this a good idea?
+instance Drawable a => Drawable (Entity a) where
+  title = title . entityVal
+  timestamp = timestamp . entityVal
+  route = route
+  drawContent = drawContent . entityVal
+  drawSummary = drawSummary . entityVal
+
+draw :: Drawable a => a -> Widget
+draw a =
   [whamlet|
-    <h3>#{verseTitle v}
-    <p>#{verseContent v}
-    <p>#{show $ verseTime v}
+    <h3>#{title a}
+    <p>#{show $ timestamp a}
+    ^{drawContent a}
   |]
 
--- \$maybe f <- verseFile v
---   ^{showFile f}
--- \$nothing
+summary :: Drawable a => a -> Widget
+summary a =
+  [whamlet|
+    <h3>#{title a}
+    ^{drawSummary a}
+  |]
 
-drawP :: Page -> Widget
-drawP p =
-  toWidget
+reference :: Drawable a => Entity a -> Widget
+reference a =
+  [whamlet|
+    <h3>
+      <a href=@{route a}>#{title a}
+    ^{drawSummary a}
+  |]
+
+instance Drawable Verse where
+  title = verseTitle
+  timestamp = verseTime
+  route = VerseR . entityKey
+  drawContent v = do
+    -- TODO: this sucks
+    file <- case verseFile v of
+      Just f -> liftHandler $ runDB $ get f
+      Nothing -> return Nothing
     [whamlet|
-      <h3>#{ES.pageTitle p}
-      <p>#{show $ pageTime p}
+      <p>#{verseContent v}
+      ^{mapM_ drawContent file}
     |]
-
--- \^{mapM_ drawV verses}
-
-drawF :: File -> Widget
-drawF f@(File title _ _ time) =
-  toWidget
+  drawSummary v = do
     [whamlet|
-      <h3>#{title}
-      <p>#{show time}
-      ^{showFile f}
+    <p>#{T.append (T.take 25 $ verseContent v) "..."}
+  |]
+
+instance Drawable Page where
+  title = ES.pageTitle
+  timestamp = pageTime
+  route = PageR . entityKey
+  drawContent p = do
+    verses <- liftHandler $ mapM (runDB . get404) $ pageVerses p
+    [whamlet|^{mapM_ draw verses}|]
+  drawSummary p = do
+    verses <- liftHandler $ mapM (runDB . get404) $ pageVerses p
+    [whamlet|
+      $forall v <- verses
+        <p>#{title v}
     |]
 
--- TODO: safe load file
-showFile :: File -> Widget
-showFile f = case fileType f of
-  "plain/text" -> do
-    liftIO $ print $ filePath f
-    c <- liftIO (readFile $ filePath f)
-    toWidget [hamlet|<p>#{c}|]
-  "image/png" -> do
-    toWidget
-      [hamlet|
-      <img
-        src=@{StorageR $ ES.fileName f}
-        alt=#{fileTitle f}
-        width=300 height=300>
-    |]
-  _ -> toWidget [hamlet|<p>can't preview|]
-
-summaryV_ :: Maybe VerseId -> Verse -> Widget
-summaryV_ vid ver =
-  toWidget
-    [hamlet|
-    ^{title vid ver}
-    <p>#{contentSummary ver}
-  |]
-  where
-    title (Just i) v =
-      [hamlet|<h3>
-        <a href=@{VerseR i}>#{verseTitle v}|]
-    title _ v = [hamlet|<h3>#{verseTitle v}|]
-
-    contentSummary v = T.append (T.take 25 $ verseContent v) "..."
-
-summaryEV :: Entity Verse -> Widget
-summaryEV (Entity vid ver) = summaryV_ (Just vid) ver
-
-summaryV :: Verse -> Widget
-summaryV = summaryV_ Nothing
-
-listVE_ :: (a -> Widget) -> [a] -> Widget
-listVE_ f es =
-  [whamlet|
-    ^{mapM_ f es}
-  |]
-
-listVEs :: [Entity Verse] -> Widget
-listVEs = listVE_ summaryEV
-
-listVs :: [Verse] -> Widget
-listVs = listVE_ summaryV
-
-summaryP :: Page -> Widget
-summaryP p =
-  [whamlet|
-    <h2>#{ES.pageTitle p}
-  |]
-
--- \^{listVs $ ES.pageVerses p}
+instance Drawable File where
+  title = fileTitle
+  timestamp = fileTime
+  route = FileR . entityKey
+  drawContent f = case fileType f of
+    -- TODO: safe load file
+    "plain/text" -> do
+      c <- liftIO (readFile $ filePath f)
+      toWidget [hamlet|<p>#{c}|]
+    "image/png" -> do
+      toWidget
+        [hamlet|
+        <img
+          src=@{StorageR $ ES.fileName f}
+          alt=#{fileTitle f}
+          width=300 height=300>
+      |]
+    _ -> toWidget [hamlet|<p>can't preview|]

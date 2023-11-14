@@ -15,20 +15,20 @@ getHomeR = do
   defaultLayout $ do
     setTitle "BookShelf"
     [whamlet|<h1>Latest Verses|]
-    listVEs verses
+    mapM_ reference verses
     [whamlet|<h1>Latest Pages|]
-    mapM_ (summaryP . entityVal) pages
+    mapM_ reference pages
     [whamlet|<h1>Latest Files|]
-    mapM_ (drawF . entityVal) files
+    mapM_ reference files
 
 getVerseR :: VerseId -> Handler Html
-getVerseR verseId = runDB (get404 verseId) >>= defaultLayout . drawV
+getVerseR verseId = runDB (get404 verseId) >>= defaultLayout . draw
 
 getPageR :: PageId -> Handler Html
-getPageR pageId = runDB (get404 pageId) >>= defaultLayout . drawP
+getPageR pageId = runDB (get404 pageId) >>= defaultLayout . draw
 
 getFileR :: FileId -> Handler Html
-getFileR fileId = runDB (get404 fileId) >>= defaultLayout . showFile
+getFileR fileId = runDB (get404 fileId) >>= defaultLayout . draw
 
 getStorageR :: Text -> Handler Html
 getStorageR fileName = 
