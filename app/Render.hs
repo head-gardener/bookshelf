@@ -6,6 +6,9 @@ import Data.Time
 import Foundation
 import Yesod
 
+data Format = Timestamped | Minimal
+  deriving (Show, Eq)
+
 class Drawable a where
   title :: a -> T.Text
   timestamp :: a -> UTCTime
@@ -22,11 +25,12 @@ instance Drawable a => Drawable (Entity a) where
   drawContent = drawContent . entityVal
   drawSummary = drawSummary . entityVal
 
-draw :: Drawable a => a -> Widget
-draw a =
+draw :: Drawable a => Format -> a -> Widget
+draw f a =
   [whamlet|
     <h3>#{title a}
-    <p>#{show $ timestamp a}
+    $if f == Timestamped
+      <p>#{show $ timestamp a}
     ^{drawContent a}
   |]
 
@@ -69,7 +73,7 @@ instance Drawable Page where
   route = PageR . entityKey
   drawContent p = do
     verses <- liftHandler $ mapM (runDB . get404) $ pageVerses p
-    [whamlet|^{mapM_ draw verses}|]
+    [whamlet|^{mapM_ (draw Minimal) verses}|]
   drawSummary p = do
     verses <- liftHandler $ mapM (runDB . get404) $ pageVerses p
     [whamlet|

@@ -5,7 +5,6 @@ import Control.Monad.Trans
 import Control.Monad.Trans.Resource (runResourceT)
 import Data.Entities as ES
 import Data.Text (pack)
-import Data.Time
 import Database.Persist.Sqlite
 import System.Environment (getArgs)
 
@@ -23,7 +22,7 @@ parseArgs args = runStderrLoggingT $
 parseArgs_ _ ("--db" : _ : _) = putStrLn "Duplicate db specfication"
 parseArgs_ (Just pool) ["add", title, content] = do
   putStrLn "adding verse..."
-  k <- runSql pool . insert . Verse (pack title) (pack content) Nothing =<< getCurrentTime
+  k <- runSql pool $ newVerse (pack title) (pack content) Nothing
   print k
 parseArgs_ (Just pool) ["repopulate"] = do
   putStrLn "repopulating..."

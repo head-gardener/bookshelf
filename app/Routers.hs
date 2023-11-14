@@ -9,9 +9,9 @@ import Data.Text
 
 getHomeR :: Handler Html
 getHomeR = do
-  verses <- runDB $ selectList [] [Desc VerseId]
-  pages <- runDB $ selectList [] [Desc PageId]
-  files <- runDB $ selectList [] [Desc FileId]
+  verses <- runDB $ selectList [] [LimitTo 5, Desc VerseId]
+  pages <- runDB $ selectList [] [LimitTo 5, Desc PageId]
+  files <- runDB $ selectList [] [LimitTo 5, Desc FileId]
   defaultLayout $ do
     setTitle "BookShelf"
     [whamlet|<h1>Latest Verses|]
@@ -22,13 +22,19 @@ getHomeR = do
     mapM_ reference files
 
 getVerseR :: VerseId -> Handler Html
-getVerseR verseId = runDB (get404 verseId) >>= defaultLayout . draw
+getVerseR verseId = do
+  verse <- runDB (get404 verseId)
+  versions <- runDB $ allVerseVs verse
+  defaultLayout $ do
+    draw Timestamped verse
+    [whamlet|<h3>History:|]
+    mapM_ reference versions
 
 getPageR :: PageId -> Handler Html
-getPageR pageId = runDB (get404 pageId) >>= defaultLayout . draw
+getPageR pageId = runDB (get404 pageId) >>= defaultLayout . draw Timestamped
 
 getFileR :: FileId -> Handler Html
-getFileR fileId = runDB (get404 fileId) >>= defaultLayout . draw
+getFileR fileId = runDB (get404 fileId) >>= defaultLayout . draw Timestamped
 
 getStorageR :: Text -> Handler Html
 getStorageR fileName = 
