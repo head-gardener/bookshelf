@@ -1,11 +1,11 @@
 module Routers where
 
-import Foundation
 import Data.Entities
-import Render
-import Database.Persist.Sqlite
-import Yesod
 import Data.Text
+import Database.Persist.Sqlite
+import Foundation
+import Render
+import Yesod
 
 getHomeR :: Handler Html
 getHomeR = do
@@ -31,12 +31,25 @@ getVerseR verseId = do
     mapM_ reference versions
 
 getPageR :: PageId -> Handler Html
-getPageR pageId = runDB (get404 pageId) >>= defaultLayout . draw Timestamped
+getPageR pageId = do
+  page <- runDB (get404 pageId)
+  versions <- runDB $ allPageVs page
+  defaultLayout $ do
+    draw Timestamped page
+    [whamlet|<h3>History:|]
+    mapM_ reference versions
 
 getFileR :: FileId -> Handler Html
-getFileR fileId = runDB (get404 fileId) >>= defaultLayout . draw Timestamped
+getFileR fileId = do
+  file <- runDB (get404 fileId)
+  versions <- runDB $ allFileVs file
+  defaultLayout $ do
+    draw Timestamped file
+    [whamlet|<h3>History:|]
+    mapM_ reference versions
 
 getStorageR :: Text -> Handler Html
-getStorageR fileName = 
+getStorageR fileName =
   runDB (getBy404 $ UniqueFName fileName) >>= sendF . entityVal
-  where sendF f = sendFile (fileType f) . filePath $ f
+  where
+    sendF f = sendFile (fileType f) . filePath $ f

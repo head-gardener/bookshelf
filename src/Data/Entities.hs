@@ -1,12 +1,12 @@
 module Data.Entities where
 
 import Control.Monad.Reader
-import Data.ContentType
-import Data.Text (Text(), unpack)
+import Data.ContentType (ContentType ())
+import Data.Maybe (fromJust)
+import Data.Text (Text (), unpack)
 import Data.Time
 import Database.Persist.Sql
 import Database.Persist.TH
-import Data.Maybe (fromJust)
 
 share
   [mkPersist sqlSettings, mkMigrate "migrateAll"]
@@ -21,66 +21,88 @@ Page
   title Text
   verses [VerseId]
   time UTCTime
+  root VCRootId
 File
   title Text
   name Text
   type ContentType
   time UTCTime
+  root VCRootId
   UniqueFName name
 VCRoot
-  title Text
 |]
 
--- class HasRoot a where
---   root :: a -> VCRootId
---   type Root (a) :: EntityField a VCRootId
+class HasTitle a where
+  title :: a -> Text
 
--- instance HasRoot Verse where
---   root = verseRoot
+instance HasTitle a => HasTitle (Entity a) where
+  title = title . entityVal
+
+instance HasTitle Verse where
+  title = verseTitle
+
+instance HasTitle File where
+  title = fileTitle
+
+instance HasTitle Page where
+  title = pageTitle
 
 filePath :: File -> FilePath
-filePath = ("/tmp/bookshelf/" ++) . unpack . fileName
+filePath = defaultPath . unpack . fileName
 
-newVerse :: MonadIO m => Text -> Text -> Maybe (Key File) -> ReaderT SqlBackend m (Key Verse)
-newVerse t c f = do
+defaultPath :: String -> FilePath
+defaultPath = ("/tmp/bookshelf/" ++)
+
+newEntry ::
+  ( MonadIO m,
+    HasTitle a,
+    PersistRecordBackend a backend,
+    PersistRecordBackend VCRoot backend,
+    PersistStoreWrite backend
+  ) =>
+  (UTCTime -> VCRootId -> a) ->
+  ReaderT backend m (Key a)
+newEntry f = do
   time <- liftIO getCurrentTime
-  vc <- insert $ VCRoot t
-  insert $ Verse t c f time vc
+  root <- insert VCRoot
+  insert $ f time root
 
-newVerse_ :: MonadIO m => Text -> Text -> Maybe (Key File) -> ReaderT SqlBackend m ()
-newVerse_ t c f = void $ newVerse t c f
-
--- TODO: (Verse -> Verse)
-editVerse :: MonadIO m => Verse -> Text -> Text -> Maybe (Key File) -> ReaderT SqlBackend m (Key Verse)
-editVerse v t c  f = do
+editEntry ::
+  ( MonadIO m,
+    HasTitle a,
+    PersistRecordBackend a backend,
+    PersistRecordBackend VCRoot backend,
+    PersistStoreWrite backend
+  ) =>
+  VCRootId ->
+  (UTCTime -> VCRootId -> a) ->
+  ReaderT backend m (Key a)
+editEntry r f = do
   time <- liftIO getCurrentTime
-  insert $ Verse t c Nothing time $ verseRoot v
-
-editVerse_ :: MonadIO m => Text -> Text -> Maybe (Key File) -> ReaderT SqlBackend m ()
-editVerse_ t c f = void $ newVerse t c f
+  insert $ f time r
 
 allVerseVs :: (MonadIO m) => Verse -> ReaderT SqlBackend m [Entity Verse]
 allVerseVs v = selectList [VerseRoot ==. verseRoot v] [Desc VerseTime]
 
--- allVersions :: (MonadIO m, HasRoot a) => a -> ReaderT SqlBackend m [Entity a]
--- allVersions r = selectList [EntityField a VCRootId ==. root r] []
+allPageVs :: (MonadIO m) => Page -> ReaderT SqlBackend m [Entity Page]
+allPageVs p = selectList [PageRoot ==. pageRoot p] [Desc PageTime]
+
+allFileVs :: (MonadIO m) => File -> ReaderT SqlBackend m [Entity File]
+allFileVs f = selectList [FileRoot ==. fileRoot f] [Desc FileTime]
 
 populate :: MonadIO m => ReaderT SqlBackend m ()
 populate = do
-  v1 <- newVerse "test verse 1" "this is a test verse" Nothing
+  v1 <- newEntry $ Verse "test verse 1" "this is a test verse" Nothing
   verse1 <- fromJust <$> get v1
-  v2 <- editVerse verse1 "test verse 2" "this is a test verse revision" Nothing
-  ft <- insert testF
-  fi <- insert testI
-  v3 <- newVerse "verse with an image file" "this test verse contains a file" (Just fi)
+  v2 <- editEntry (verseRoot verse1) $ Verse "test verse 2" "this is a test verse revision" Nothing
+  ft <- newEntry testF
+  file1 <- fromJust <$> get ft
+  fi <- editEntry (fileRoot file1) testI
+  v3 <- newEntry $ Verse "verse with an image file" "this test verse contains a file" (Just fi)
   verse3 <- fromJust <$> get v3
-  _ <- editVerse verse3 "verse with a text file" (verseContent verse3) (Just ft)
-  insert_ $ Page "Sample Page" [v1, v2, v3] time
+  _ <- editEntry (verseRoot verse3) $ Verse "verse with a text file" (verseContent verse3) (Just ft)
+  _ <- newEntry $ Page "Sample Page" [v1, v2, v3]
+  return ()
   where
-    testI :: File
-    testI = File "Test Image!!" "testimage" "image/png" time
-    testF :: File
-    testF = File "Test File!!" "testfile" "plain/text" time
-
-    time :: UTCTime
-    time = UTCTime (fromGregorian 1970 1 1) 0
+    testI = File "Test Image!!" "testimage" "image/png"
+    testF = File "Test File!!" "testfile" "plain/text"

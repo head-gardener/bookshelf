@@ -36,7 +36,8 @@ library:
   source-dirs: src
   generated-other-modules: Paths_bookshelf
   dependencies:
-    - bytestring
+    - utf8-string
+    - magic
 
 executables:
   edge:
@@ -54,6 +55,8 @@ executables:
     generated-other-modules: Paths_bookshelf
     dependencies:
       - bookshelf
+      - directory
+      - filepath
     ghc-options:
       - -threaded
 

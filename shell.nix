@@ -5,5 +5,9 @@ with pkgs; (haskellPackages.extend (haskell.lib.compose.packageSourceOverrides {
   .shellFor {
     packages = p: [p.proj];
     withHoogle = true;
-    buildInputs = [ hpack cabal-install ];
+    buildInputs = [
+      hpack
+      cabal-install
+      haskell-language-server
+    ];
   }
