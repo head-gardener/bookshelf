@@ -67,13 +67,24 @@ filePath = defaultPath . unpack . fileName
 
 newFile :: Text -> FilePath -> IO (UTCTime -> VCRootId -> File)
 newFile t p = do
-  ct <- CT.deduce p
-  n <- hash <$> BS.readFile p
+  isDir <- doesDirectoryExist p
+  path <-
+    if isDir
+      then error "directory"
+      else return p
+
+  ct <- CT.deduce path
+  n <- hash <$> BS.readFile path
+  let destPath = defaultPath (unpack n)
+
   -- TODO: move to logger
   putStrLn $ "content type: " ++ CT.unpack ct
-  putStrLn $ "path: " ++ defaultPath (unpack n)
-  -- FIXME: File gets updated before verifying name uniquness
-  copyFile p $ defaultPath (unpack n)
+  putStrLn $ "path: " ++ destPath
+
+  destExists <- doesFileExist destPath
+  if destExists
+    then error "File already stored, not overwriting"
+    else copyFile p $ defaultPath (unpack n)
   return $ File t n ct
 
 defaultPath :: String -> FilePath

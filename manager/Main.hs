@@ -10,7 +10,7 @@ import Data.Int (Int64)
 import Data.Text (pack, unpack)
 import Data.Text.IO qualified as TIO
 import Database.Persist.Sqlite
-import System.Directory (doesFileExist)
+import System.Directory (doesPathExist)
 import System.Environment (getArgs)
 import Text.Read (readMaybe)
 
@@ -34,7 +34,7 @@ parseArgs_ (Just pool) ("verse" : t : content : file) = do
   where
     parseFile :: [String] -> IO (Maybe FileId)
     parseFile [f] = do
-      isFile <- doesFileExist f
+      isFile <- doesPathExist f
       let fileKeyM = toSqlKey <$> readMaybe f
       fileEntM <- join <$> mapM (runSql pool . get) fileKeyM
       case (isFile, fileKeyM, fileEntM) of
