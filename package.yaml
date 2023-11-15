@@ -61,6 +61,8 @@ executables:
     generated-other-modules: Paths_bookshelf
     dependencies:
       - bookshelf
+      - directory
+      - bytestring
     ghc-options:
       - -threaded
 
