@@ -9,6 +9,7 @@ import Data.ContentType qualified as CT
 import Data.Digest.CityHash
 import Data.Maybe (fromJust)
 import Data.Text (Text (), unpack)
+import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import Data.Time
 import Database.Persist.Sql
@@ -54,15 +55,20 @@ instance HasTitle File where
 instance HasTitle Page where
   title = pageTitle
 
+hash :: BS.ByteString -> Text
+hash =
+  format . TE.decodeUtf8 . B64.encode . BS.toStrict . BN.encode . cityHash128
+  where
+    format = trim . T.replace "/" "-"
+    trim s = T.take (T.length s - 2) s
+
 filePath :: File -> FilePath
 filePath = defaultPath . unpack . fileName
 
 newFile :: Text -> FilePath -> IO (UTCTime -> VCRootId -> File)
 newFile t p = do
   ct <- CT.deduce p
-  n <-
-    TE.decodeUtf8 . B64.encode . BS.toStrict . BN.encode . cityHash128
-      <$> BS.readFile p
+  n <- hash <$> BS.readFile p
   -- TODO: move to logger
   putStrLn $ "content type: " ++ CT.unpack ct
   putStrLn $ "path: " ++ defaultPath (unpack n)
