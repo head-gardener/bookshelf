@@ -38,6 +38,12 @@ library:
   dependencies:
     - utf8-string
     - magic
+    - cityhash
+    - base64-bytestring
+    - bytestring
+    - binary
+    - directory
+    - filepath
 
 executables:
   edge:
@@ -55,8 +61,6 @@ executables:
     generated-other-modules: Paths_bookshelf
     dependencies:
       - bookshelf
-      - directory
-      - filepath
     ghc-options:
       - -threaded
 

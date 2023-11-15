@@ -3,13 +3,10 @@ module Main where
 import Control.Monad.Logger (runNoLoggingT)
 import Control.Monad.Trans
 import Control.Monad.Trans.Resource (runResourceT)
-import Data.ContentType qualified as CT
 import Data.Entities as ES
 import Data.Text (pack)
 import Database.Persist.Sqlite
-import System.Directory
 import System.Environment (getArgs)
-import System.FilePath
 
 main :: IO ()
 main = getArgs >>= parseArgs
@@ -31,15 +28,8 @@ parseArgs_ (Just pool) ["verse", t, content] = do
         Verse (pack t) (pack content) Nothing
   print k
 parseArgs_ (Just pool) ["upload", t, path] = do
-  let n = takeBaseName path
-  contentType <- CT.deduce path
-  putStrLn $ "uploading..." ++ n
-  putStrLn $ "content type: " ++ CT.unpack contentType
-  copyFile path $ defaultPath n
-  k <-
-    runSql pool $
-      newEntry $
-        File (pack t) (pack n) contentType
+  putStrLn "uploading..."
+  k <- newFile (pack t) path >>= runSql pool . newEntry
   print k
 parseArgs_ (Just pool) ["repopulate"] = do
   putStrLn "repopulating..."

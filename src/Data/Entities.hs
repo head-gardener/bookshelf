@@ -1,12 +1,19 @@
 module Data.Entities where
 
 import Control.Monad.Reader
+import Data.Binary qualified as BN
+import Data.ByteString qualified as BS
+import Data.ByteString.Base64 qualified as B64
 import Data.ContentType (ContentType ())
+import Data.ContentType qualified as CT
+import Data.Digest.CityHash
 import Data.Maybe (fromJust)
 import Data.Text (Text (), unpack)
+import Data.Text.Encoding qualified as TE
 import Data.Time
 import Database.Persist.Sql
 import Database.Persist.TH
+import System.Directory
 
 share
   [mkPersist sqlSettings, mkMigrate "migrateAll"]
@@ -49,6 +56,19 @@ instance HasTitle Page where
 
 filePath :: File -> FilePath
 filePath = defaultPath . unpack . fileName
+
+newFile :: Text -> FilePath -> IO (UTCTime -> VCRootId -> File)
+newFile t p = do
+  ct <- CT.deduce p
+  n <-
+    TE.decodeUtf8 . B64.encode . BS.toStrict . BN.encode . cityHash128
+      <$> BS.readFile p
+  -- TODO: move to logger
+  putStrLn $ "content type: " ++ CT.unpack ct
+  putStrLn $ "path: " ++ defaultPath (unpack n)
+  -- FIXME: File gets updated before verifying name uniquness
+  copyFile p $ defaultPath (unpack n)
+  return $ File t n ct
 
 defaultPath :: String -> FilePath
 defaultPath = ("/tmp/bookshelf/" ++)
