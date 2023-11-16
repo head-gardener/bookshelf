@@ -6,6 +6,9 @@ import Data.Text qualified as T
 import Data.Time
 import Foundation
 import Yesod
+import System.Storage.Native
+import System.Storage qualified as ST
+import Data.ByteString.Lazy.Char8 qualified as BL
 
 data Format = Timestamped | Minimal
   deriving (Show, Eq)
@@ -83,9 +86,8 @@ instance Drawable File where
   route = FileR . entityKey
   drawContent f = do
     case fileType f of
-      -- TODO: safe load file
       "text/plain" -> do
-        c <- liftIO (readFile $ filePath f)
+        c <- runStorage $ fmap BL.unpack $ ST.readFile $ T.unpack $ ES.fileName f
         toWidget
           [hamlet|
           <p>Preview:

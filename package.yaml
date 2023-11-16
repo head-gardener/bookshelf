@@ -46,6 +46,7 @@ library:
     - filepath
     - zlib
     - tar
+    - containers
 
 executables:
   edge:
@@ -54,6 +55,7 @@ executables:
     generated-other-modules: Paths_bookshelf
     dependencies:
       - bookshelf
+      - bytestring
       - yesod
     ghc-options:
       - -threaded

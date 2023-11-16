@@ -1,11 +1,12 @@
 module Routers where
 
-import Data.Entities
-import Data.Text
+import Data.Entities as ES
+import Data.Text as T
 import Database.Persist.Sqlite
 import Foundation
 import Render
 import Yesod
+import System.Storage qualified as ST
 
 getHomeR :: Handler Html
 getHomeR = do
@@ -52,4 +53,6 @@ getStorageR :: Text -> Handler Html
 getStorageR fileName =
   runDB (getBy404 $ UniqueFName fileName) >>= sendF . entityVal
   where
-    sendF f = sendFile (fileType f) . filePath $ f
+    sendF f = do
+      path <- runStorage $ ST.exportPath $ T.unpack $ ES.fileName f
+      sendFile (fileType f) path

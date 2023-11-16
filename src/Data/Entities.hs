@@ -6,11 +6,10 @@ import Control.Monad.Reader
 import Data.Binary qualified as BN
 import Data.ByteString qualified as BS
 import Data.ByteString.Base64.Lazy qualified as B64
-import Data.ByteString.Lazy qualified as BL
+-- import Data.ByteString.Lazy qualified as BL
 import Data.ContentType (ContentType ())
 import Data.ContentType qualified as CT
 import Data.Digest.CityHash
-import Data.Maybe (fromJust)
 import Data.Text (Text (), unpack)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
@@ -18,7 +17,8 @@ import Data.Time
 import Database.Persist.Sql
 import Database.Persist.TH
 import System.Directory
-import System.FilePath ((</>))
+import System.Storage.Native
+import System.Storage as ST
 
 share
   [mkPersist sqlSettings, mkMigrate "migrateAll"]
@@ -68,40 +68,30 @@ hash =
     format = trim . T.replace "/" "-"
     trim s = T.take (T.length s - 2) s
 
-filePath :: File -> FilePath
-filePath = defaultPath . unpack . fileName
-
-newFile :: Text -> FilePath -> IO (UTCTime -> VCRootId -> File)
+newFile :: (StorageMonad m) => Text -> FilePath -> m (UTCTime -> VCRootId -> File)
 newFile t p = do
-  isDir <- doesDirectoryExist p
+  isDir <- liftIO $ doesDirectoryExist p
 
   -- large files won't fit in memory - dat is lazy, but
   -- hash operation isn't. requires testing.
   (dat, ct) <-
     if isDir
       then do
-        comp <- GZip.compress . TAR.write <$> (TAR.pack p =<< listDirectory p)
+        comp <- liftIO $ GZip.compress . TAR.write <$> (TAR.pack p =<< listDirectory p)
         return (comp, "application/gzip")
       else do
-        d <- BL.readFile p
-        ct <- CT.deduce p
+        d <- ST.readFile p
+        ct <- liftIO $ CT.deduce p
         return (d, ct)
 
   let h = hash $ BS.toStrict dat
-  let destPath = defaultPath (unpack h)
+  destPath <- ST.expandPath (unpack h)
 
   -- TODO: move to logger
-  putStrLn $ "content type: " ++ CT.unpack ct
-  putStrLn $ "path: " ++ destPath
-
-  destExists <- doesFileExist destPath
-  if destExists
-    then error "File already stored, not overwriting"
-    else BL.writeFile destPath dat
+  liftIO $ putStrLn $ "content type: " ++ CT.unpack ct
+  liftIO $ putStrLn $ "path: " ++ destPath
+  ST.writeFile (unpack h) dat
   return $ File t h ct
-
-defaultPath :: String -> FilePath
-defaultPath = ("/tmp/bookshelf/" </>)
 
 newEntry ::
   ( MonadIO m,
@@ -139,20 +129,3 @@ allPageVs p = selectList [PageRoot ==. pageRoot p] [Desc PageTime]
 
 allFileVs :: (MonadIO m) => File -> ReaderT SqlBackend m [Entity File]
 allFileVs f = selectList [FileRoot ==. fileRoot f] [Desc FileTime]
-
-populate :: MonadIO m => ReaderT SqlBackend m ()
-populate = do
-  v1 <- newEntry $ Verse "test verse 1" "this is a test verse" Nothing
-  verse1 <- fromJust <$> get v1
-  v2 <- editEntry (verseRoot verse1) $ Verse "test verse 2" "this is a test verse revision" Nothing
-  ft <- newEntry testF
-  file1 <- fromJust <$> get ft
-  fi <- editEntry (fileRoot file1) testI
-  v3 <- newEntry $ Verse "verse with an image file" "this test verse contains a file" (Just fi)
-  verse3 <- fromJust <$> get v3
-  _ <- editEntry (verseRoot verse3) $ Verse "verse with a text file" (verseContent verse3) (Just ft)
-  _ <- newEntry $ Page "Sample Page" [v1, v2, v3]
-  return ()
-  where
-    testI = File "Test Image!!" "testimage" "image/png"
-    testF = File "Test File!!" "testfile" "plain/text"

@@ -12,10 +12,14 @@ import Data.Text.IO qualified as TIO
 import Database.Persist.Sqlite
 import System.Directory (doesPathExist)
 import System.Environment (getArgs)
+import System.Storage.Native
 import Text.Read (readMaybe)
 
 main :: IO ()
 main = getArgs >>= parseArgs
+
+root :: FilePath
+root = "/tmp/bookshelf"
 
 parseArgs :: [String] -> IO ()
 parseArgs ("--db" : db : rs) = runStderrLoggingT $
@@ -48,14 +52,11 @@ parseArgs_ (Just pool) ("verse" : t : content : file) = do
 parseArgs_ _ ["hash", path] = do
   BS.readFile path >>= TIO.putStrLn . hash
 parseArgs_ (Just pool) ["upload", t, path] = upload pool t path >>= print
-parseArgs_ (Just pool) ["repopulate"] =
-  putStrLn "repopulating..." >> runSql pool populate
 parseArgs_ _ _ = do
   putStrLn "usage: manager [--db <db>]"
   putStrLn "\tverse ..."
   putStrLn "\tupload ..."
   putStrLn "\thash ..."
-  putStrLn "\trepopulate"
 
 fileIdNotFound :: Int64 -> String
 fileIdNotFound fid = "File #" ++ show fid ++ " not found"
@@ -75,7 +76,8 @@ cantDeduceFile f =
 
 upload pool t p = do
   putStrLn "uploading..."
-  newFile (pack t) p >>= runSql pool . newEntry
+  runNativeStorage (newFile (pack t) p) root
+    >>= runSql pool . newEntry
 
 runSql pool f =
   runResourceT $

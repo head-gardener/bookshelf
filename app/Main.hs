@@ -10,12 +10,15 @@ import Application ()
 import System.Exit (exitFailure)
 import System.Environment (getArgs)
 
+defaultRoot :: FilePath
+defaultRoot = "/tmp/bookshelf"
+
 main :: IO ()
 main = do
   port <- getArgs >>= parseArgs
   runStderrLoggingT $ withSqlitePool "test.db3" 10 $ \pool -> liftIO $ do
     runResourceT $ flip runSqlPool pool $ runMigration migrateAll
-    warp port $ BookShelf pool
+    warp port $ BookShelf pool defaultRoot
   where
     parseArgs [port] = return $ read port
     parseArgs [] = return 3000

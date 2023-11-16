@@ -1,4 +1,3 @@
-- storage management rework **(it sucks)**
 - update entry on title clash?
 - chain update functionality
 - list
