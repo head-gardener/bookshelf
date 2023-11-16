@@ -1,4 +1,3 @@
-- upload directories with tar gz
 - storage management rework **(it sucks)**
 - update entry on title clash?
 - chain update functionality

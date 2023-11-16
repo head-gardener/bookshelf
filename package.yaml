@@ -44,6 +44,8 @@ library:
     - binary
     - directory
     - filepath
+    - zlib
+    - tar
 
 executables:
   edge:

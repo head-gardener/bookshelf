@@ -43,11 +43,13 @@ parseArgs_ (Just pool) ("verse" : t : content : file) = do
         (_, Just fid, Nothing) -> error $ fileIdNotFound $ fromSqlKey fid
         _ -> error $ cantDeduceFile f
     parseFile [] = return Nothing
-    parseFile (_ : extra) = error $ "unexpected arguments: \"" ++ unwords extra ++ "\""
+    parseFile (_ : extra) =
+      error $ "unexpected arguments: \"" ++ unwords extra ++ "\""
 parseArgs_ _ ["hash", path] = do
   BS.readFile path >>= TIO.putStrLn . hash
 parseArgs_ (Just pool) ["upload", t, path] = upload pool t path >>= print
-parseArgs_ (Just pool) ["repopulate"] = putStrLn "repopulating..." >> runSql pool populate
+parseArgs_ (Just pool) ["repopulate"] =
+  putStrLn "repopulating..." >> runSql pool populate
 parseArgs_ _ _ = do
   putStrLn "usage: manager [--db <db>]"
   putStrLn "\tverse ..."
@@ -59,7 +61,11 @@ fileIdNotFound :: Int64 -> String
 fileIdNotFound fid = "File #" ++ show fid ++ " not found"
 
 linkingWith :: File -> String
-linkingWith f = "Linking with \"" ++ unpack (fileTitle f) ++ "\", " ++ show (fileTime f)
+linkingWith f =
+  "Linking with \""
+    ++ unpack (fileTitle f)
+    ++ "\", "
+    ++ show (fileTime f)
 
 cantDeduceFile :: String -> String
 cantDeduceFile f =

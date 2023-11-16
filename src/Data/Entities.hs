@@ -1,9 +1,12 @@
 module Data.Entities where
 
+import Codec.Archive.Tar qualified as TAR
+import Codec.Compression.GZip qualified as GZip
 import Control.Monad.Reader
 import Data.Binary qualified as BN
 import Data.ByteString qualified as BS
 import Data.ByteString.Base64 qualified as B64
+import Data.ByteString.Lazy qualified as BL
 import Data.ContentType (ContentType ())
 import Data.ContentType qualified as CT
 import Data.Digest.CityHash
@@ -15,6 +18,7 @@ import Data.Time
 import Database.Persist.Sql
 import Database.Persist.TH
 import System.Directory
+import System.FilePath ((</>))
 
 share
   [mkPersist sqlSettings, mkMigrate "migrateAll"]
@@ -68,12 +72,16 @@ filePath = defaultPath . unpack . fileName
 newFile :: Text -> FilePath -> IO (UTCTime -> VCRootId -> File)
 newFile t p = do
   isDir <- doesDirectoryExist p
-  path <-
+  (path, ct) <-
     if isDir
-      then error "directory"
-      else return p
+      then do
+        let temp = defaultPath "compression"
+        BL.writeFile temp . GZip.compress . TAR.write
+          =<< TAR.pack p
+          =<< listDirectory p
+        return (temp, "application/gzip")
+      else (p,) <$> CT.deduce p
 
-  ct <- CT.deduce path
   n <- hash <$> BS.readFile path
   let destPath = defaultPath (unpack n)
 
@@ -84,11 +92,11 @@ newFile t p = do
   destExists <- doesFileExist destPath
   if destExists
     then error "File already stored, not overwriting"
-    else copyFile p $ defaultPath (unpack n)
+    else copyFile path $ defaultPath (unpack n)
   return $ File t n ct
 
 defaultPath :: String -> FilePath
-defaultPath = ("/tmp/bookshelf/" ++)
+defaultPath = ("/tmp/bookshelf/" </>)
 
 newEntry ::
   ( MonadIO m,
