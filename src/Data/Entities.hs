@@ -5,7 +5,7 @@ import Codec.Compression.GZip qualified as GZip
 import Control.Monad.Reader
 import Data.Binary qualified as BN
 import Data.ByteString qualified as BS
-import Data.ByteString.Base64 qualified as B64
+import Data.ByteString.Base64.Lazy qualified as B64
 import Data.ByteString.Lazy qualified as BL
 import Data.ContentType (ContentType ())
 import Data.ContentType qualified as CT
@@ -61,7 +61,9 @@ instance HasTitle Page where
 
 hash :: BS.ByteString -> Text
 hash =
-  format . TE.decodeUtf8 . B64.encode . BS.toStrict . BN.encode . cityHash128
+  format . TE.decodeUtf8 . BS.toStrict . B64.encode . BN.encode . cityHash128
+  -- cityHash takes strict bytestrings since it's foreign, which
+  -- is unfortunate.
   where
     format = trim . T.replace "/" "-"
     trim s = T.take (T.length s - 2) s
@@ -72,18 +74,21 @@ filePath = defaultPath . unpack . fileName
 newFile :: Text -> FilePath -> IO (UTCTime -> VCRootId -> File)
 newFile t p = do
   isDir <- doesDirectoryExist p
-  (path, ct) <-
+
+  -- large files won't fit in memory - dat is lazy, but
+  -- hash operation isn't. requires testing.
+  (dat, ct) <-
     if isDir
       then do
-        let temp = defaultPath "compression"
-        BL.writeFile temp . GZip.compress . TAR.write
-          =<< TAR.pack p
-          =<< listDirectory p
-        return (temp, "application/gzip")
-      else (p,) <$> CT.deduce p
+        comp <- GZip.compress . TAR.write <$> (TAR.pack p =<< listDirectory p)
+        return (comp, "application/gzip")
+      else do
+        d <- BL.readFile p
+        ct <- CT.deduce p
+        return (d, ct)
 
-  n <- hash <$> BS.readFile path
-  let destPath = defaultPath (unpack n)
+  let h = hash $ BS.toStrict dat
+  let destPath = defaultPath (unpack h)
 
   -- TODO: move to logger
   putStrLn $ "content type: " ++ CT.unpack ct
@@ -92,8 +97,8 @@ newFile t p = do
   destExists <- doesFileExist destPath
   if destExists
     then error "File already stored, not overwriting"
-    else copyFile path $ defaultPath (unpack n)
-  return $ File t n ct
+    else BL.writeFile destPath dat
+  return $ File t h ct
 
 defaultPath :: String -> FilePath
 defaultPath = ("/tmp/bookshelf/" </>)
