@@ -24,7 +24,7 @@ instance StorageMonad Memory where
     liftIO $
       tryJust
         (\(_ :: ErrorCall) -> Just NotFound)
-        (liftIO $ return $ m ! f)
+        (evaluate $ m ! f)
 
   expandPath p = return $ ":" ++ p ++ ":"
 

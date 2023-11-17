@@ -76,8 +76,9 @@ tests:
     main: Spec.hs
     source-dirs:
       - test
-      - src
     dependencies:
       - hspec
       - QuickCheck
+      - bookshelf
+      - directory
     build-tools: hspec-discover

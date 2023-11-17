@@ -41,7 +41,4 @@ instance StorageExport Native where
 runNativeStorage :: Native a -> FilePath -> IO a
 runNativeStorage n r = runReaderT n' r
   where
-    n' = do
-      rootExists <- liftIO $ doesDirectoryExist r
-      unless rootExists $ liftIO $ error $ "Root " ++ r ++ " doesn't exist."
-      n
+    n' = liftIO (createDirectoryIfMissing True r) >> n
