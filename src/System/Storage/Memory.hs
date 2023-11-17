@@ -2,10 +2,11 @@
 
 module System.Storage.Memory where
 
+import Control.Exception
 import Control.Monad.State
 import Data.ByteString.Lazy qualified as BL
-import System.Storage
 import Data.Map as Map
+import System.Storage
 
 type Memory = StateT (Map FilePath BL.ByteString) IO
 
@@ -14,10 +15,16 @@ type Memory = StateT (Map FilePath BL.ByteString) IO
 instance StorageMonad Memory where
   writeFile f s = do
     m <- get
-    when (f `member` m) $ error "File already there :("
-    modify' $ Map.insert f s
+    if f `member` m
+      then return $ Left NotOverwritng
+      else modify' (Map.insert f s) >> return (Right ())
 
-  readFile f = gets (! f)
+  readFile f = do
+    m <- get
+    liftIO $
+      tryJust
+        (\(_ :: ErrorCall) -> Just NotFound)
+        (liftIO $ return $ m ! f)
 
   expandPath p = return $ ":" ++ p ++ ":"
 

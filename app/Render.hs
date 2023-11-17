@@ -6,7 +6,6 @@ import Data.Text qualified as T
 import Data.Time
 import Foundation
 import Yesod
-import System.Storage.Native
 import System.Storage qualified as ST
 import Data.ByteString.Lazy.Char8 qualified as BL
 
@@ -87,11 +86,12 @@ instance Drawable File where
   drawContent f = do
     case fileType f of
       "text/plain" -> do
-        c <- runStorage $ fmap BL.unpack $ ST.readFile $ T.unpack $ ES.fileName f
+        c <- runStorage $ ST.readFile $ T.unpack $ ES.fileName f
+        s <- either (const notFound) (return . BL.unpack) c
         toWidget
           [hamlet|
           <p>Preview:
-          <p>#{take 100 c}
+          <p>#{take 100 s}
         |]
       "image/png" -> do
         toWidget

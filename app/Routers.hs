@@ -5,8 +5,8 @@ import Data.Text as T
 import Database.Persist.Sqlite
 import Foundation
 import Render
-import Yesod
 import System.Storage qualified as ST
+import Yesod
 
 getHomeR :: Handler Html
 getHomeR = do
@@ -54,5 +54,7 @@ getStorageR fileName =
   runDB (getBy404 $ UniqueFName fileName) >>= sendF . entityVal
   where
     sendF f = do
-      path <- runStorage $ ST.exportPath $ T.unpack $ ES.fileName f
+      path <-
+        either (const notFound) return
+          =<< runStorage (ST.exportPath $ T.unpack $ ES.fileName f)
       sendFile (fileType f) path

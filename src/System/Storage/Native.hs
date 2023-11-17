@@ -2,6 +2,7 @@
 
 module System.Storage.Native where
 
+import Control.Exception
 import Control.Monad.Reader
 import Data.ByteString.Lazy qualified as BL
 import System.Directory
@@ -14,16 +15,28 @@ instance StorageMonad Native where
   writeFile f s = do
     path <- expandPath f
     destExists <- liftIO $ doesPathExist path
-    when destExists $ error "File already stored, not overwriting"
-    liftIO $ BL.writeFile path s
+    if destExists
+      then return $ Left NotOverwritng
+      else do
+        liftIO $ BL.writeFile path s
+        return $ Right ()
 
-  readFile = expandPath >=> liftIO . BL.readFile
+  readFile =
+    expandPath
+      >=> liftIO . tryJust (\(_ :: IOException) -> Just NotFound) . BL.readFile
+
   expandPath p = do
     r <- ask
-    return $ p </> r
+    return $ r </> p
 
 instance StorageExport Native where
-  exportPath = expandPath
+  exportPath p = do
+    p' <- expandPath p
+    destExists <- liftIO $ doesPathExist p'
+    return $
+      if not destExists
+        then Left NotFound
+        else Right p'
 
 runNativeStorage :: Native a -> FilePath -> IO a
 runNativeStorage n r = runReaderT n' r

@@ -6,7 +6,7 @@ import Control.Monad.Reader
 import Data.Binary qualified as BN
 import Data.ByteString qualified as BS
 import Data.ByteString.Base64.Lazy qualified as B64
--- import Data.ByteString.Lazy qualified as BL
+import Data.ByteString.Lazy qualified as BL
 import Data.ContentType (ContentType ())
 import Data.ContentType qualified as CT
 import Data.Digest.CityHash
@@ -17,7 +17,6 @@ import Data.Time
 import Database.Persist.Sql
 import Database.Persist.TH
 import System.Directory
-import System.Storage.Native
 import System.Storage as ST
 
 share
@@ -62,13 +61,20 @@ instance HasTitle Page where
 hash :: BS.ByteString -> Text
 hash =
   format . TE.decodeUtf8 . BS.toStrict . B64.encode . BN.encode . cityHash128
-  -- cityHash takes strict bytestrings since it's foreign, which
-  -- is unfortunate.
   where
+    -- cityHash takes strict bytestrings since it's foreign, which
+    -- is unfortunate.
+
     format = trim . T.replace "/" "-"
     trim s = T.take (T.length s - 2) s
 
-newFile :: (StorageMonad m) => Text -> FilePath -> m (UTCTime -> VCRootId -> File)
+-- | Ensure file is on the storage, returning a curried entity constructor.
+-- Doesn't check whether the file exists and errors if it doesn't.
+newFile ::
+  (StorageMonad m) =>
+  Text ->
+  FilePath ->
+  m (Either StorageError (UTCTime -> VCRootId -> File))
 newFile t p = do
   isDir <- liftIO $ doesDirectoryExist p
 
@@ -80,7 +86,7 @@ newFile t p = do
         comp <- liftIO $ GZip.compress . TAR.write <$> (TAR.pack p =<< listDirectory p)
         return (comp, "application/gzip")
       else do
-        d <- ST.readFile p
+        d <- liftIO $ BL.readFile p
         ct <- liftIO $ CT.deduce p
         return (d, ct)
 
@@ -90,8 +96,7 @@ newFile t p = do
   -- TODO: move to logger
   liftIO $ putStrLn $ "content type: " ++ CT.unpack ct
   liftIO $ putStrLn $ "path: " ++ destPath
-  ST.writeFile (unpack h) dat
-  return $ File t h ct
+  (File t h ct <$) <$> ST.writeFile (unpack h) dat
 
 newEntry ::
   ( MonadIO m,
