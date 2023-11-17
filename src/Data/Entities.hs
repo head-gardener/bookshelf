@@ -10,6 +10,7 @@ import Data.ByteString.Lazy qualified as BL
 import Data.ContentType (ContentType ())
 import Data.ContentType qualified as CT
 import Data.Digest.CityHash
+import Data.Functor ((<&>))
 import Data.Text (Text (), unpack)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
@@ -77,19 +78,10 @@ newFile ::
   m (Either StorageError (UTCTime -> VCRootId -> File))
 newFile t p = do
   isDir <- liftIO $ doesDirectoryExist p
+  (dat, ct) <- if isDir then readDir p else readFile' p
 
   -- large files won't fit in memory - dat is lazy, but
   -- hash operation isn't. requires testing.
-  (dat, ct) <-
-    if isDir
-      then do
-        comp <- liftIO $ GZip.compress . TAR.write <$> (TAR.pack p =<< listDirectory p)
-        return (comp, "application/gzip")
-      else do
-        d <- liftIO $ BL.readFile p
-        ct <- liftIO $ CT.deduce p
-        return (d, ct)
-
   let h = hash $ BS.toStrict dat
   destPath <- ST.expandPath (unpack h)
 
@@ -97,6 +89,18 @@ newFile t p = do
   liftIO $ putStrLn $ "content type: " ++ CT.unpack ct
   liftIO $ putStrLn $ "path: " ++ destPath
   (File t h ct <$) <$> ST.writeFile (unpack h) dat
+  where
+    readDir dir =
+      liftIO $
+        listDirectory dir
+          >>= TAR.pack dir
+          <&> GZip.compress . TAR.write
+          <&> (,"application/gzip")
+
+    readFile' file = do
+      d <- liftIO $ BL.readFile file
+      ct <- liftIO $ CT.deduce file
+      return (d, ct)
 
 newEntry ::
   ( MonadIO m,

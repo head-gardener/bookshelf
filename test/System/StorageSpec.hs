@@ -53,9 +53,6 @@ nativeShouldReturn :: (Show a, Eq a) => a -> Native a -> IO ()
 nativeShouldReturn r a = nativeShouldReturn' r (const a)
 
 makeTestPath :: IO FilePath
-makeTestPath = do
-  path <- fmap format getCurrentTime
-  createDirectoryIfMissing True path
-  return path
+makeTestPath = fmap format getCurrentTime
   where
     format = ("./test-files/" ++) . intercalate "=" . words . show
