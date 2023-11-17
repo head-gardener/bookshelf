@@ -4,7 +4,7 @@ import Control.Monad (unless)
 import Control.Monad.IO.Class
 import Data.List (intercalate)
 import Data.Time
-import System.Directory (createDirectoryIfMissing, doesPathExist)
+import System.Directory (doesPathExist)
 import System.FilePath
 import System.Storage as ST
 import System.Storage.Memory

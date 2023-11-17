@@ -1,4 +1,4 @@
 - update entry on title clash?
 - chain update functionality
-- exclude .gitignore when uploading dirs
+- lazy gitignore strip
 - list

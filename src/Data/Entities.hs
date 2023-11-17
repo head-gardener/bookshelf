@@ -18,7 +18,9 @@ import Data.Time
 import Database.Persist.Sql
 import Database.Persist.TH
 import System.Directory
-import System.Storage as ST
+import System.Storage qualified as ST
+import System.Storage (StorageMonad, StorageError)
+import Data.Gitignore
 
 share
   [mkPersist sqlSettings, mkMigrate "migrateAll"]
@@ -93,6 +95,7 @@ newFile t p = do
     readDir dir =
       liftIO $
         listDirectory dir
+          >>= tryGitignore
           >>= TAR.pack dir
           <&> GZip.compress . TAR.write
           <&> (,"application/gzip")
@@ -101,6 +104,16 @@ newFile t p = do
       d <- liftIO $ BL.readFile file
       ct <- liftIO $ CT.deduce file
       return (d, ct)
+
+    -- fs isn't the full file tree - 
+    -- some gitignore entries will be ignored!
+    tryGitignore :: [FilePath] -> IO [FilePath]
+    tryGitignore fs
+      | ".gitignore" `elem` fs = do
+        putStrLn ".gitignore found"
+        c <- lines <$> readFile ".gitignore"
+        return $ applyGitignore c fs
+      | otherwise = return fs
 
 newEntry ::
   ( MonadIO m,
