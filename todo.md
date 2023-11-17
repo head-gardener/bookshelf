@@ -1,3 +1,4 @@
-- chain update functionality
+- add pages
+- chain update pages
 - lazy gitignore strip
 - list

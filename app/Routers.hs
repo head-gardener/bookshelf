@@ -22,32 +22,30 @@ getHomeR = do
     [whamlet|<h1>Latest Files|]
     mapM_ reference files
 
-getVerseR :: VerseId -> Handler Html
-getVerseR verseId = do
-  verse <- runDB (get404 verseId)
-  versions <- runDB $ allVerseVs verse
+defaultPage ::
+  ( PersistEntityBackend a ~ SqlBackend,
+    PersistEntity a,
+    HasVersions a,
+    Drawable a
+  ) =>
+  Key a ->
+  HandlerFor BookShelf Html
+defaultPage objId = do
+  obj <- runDB (get404 objId)
+  versions <- runDB $ allVersions obj
   defaultLayout $ do
-    draw Timestamped verse
+    draw Timestamped obj
     [whamlet|<h3>History:|]
     mapM_ reference versions
+
+getVerseR :: VerseId -> Handler Html
+getVerseR = defaultPage
 
 getPageR :: PageId -> Handler Html
-getPageR pageId = do
-  page <- runDB (get404 pageId)
-  versions <- runDB $ allPageVs page
-  defaultLayout $ do
-    draw Timestamped page
-    [whamlet|<h3>History:|]
-    mapM_ reference versions
+getPageR = defaultPage
 
 getFileR :: FileId -> Handler Html
-getFileR fileId = do
-  file <- runDB (get404 fileId)
-  versions <- runDB $ allFileVs file
-  defaultLayout $ do
-    draw Timestamped file
-    [whamlet|<h3>History:|]
-    mapM_ reference versions
+getFileR = defaultPage
 
 getStorageR :: Text -> Handler Html
 getStorageR fileName =

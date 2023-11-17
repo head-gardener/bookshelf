@@ -1,6 +1,6 @@
 module Main where
 
-import Control.Monad (join)
+import Control.Monad (join, (>=>))
 import Control.Monad.Logger
 import Control.Monad.Reader (ReaderT)
 import Control.Monad.Trans
@@ -27,10 +27,10 @@ defaultRoot :: FilePath
 defaultRoot = "/tmp/bookshelf"
 
 parseArgs :: [String] -> IO ()
-parseArgs ("--db" : db : rs) = runStderrLoggingT $
+parseArgs ("--db" : db : rs) = runStderrLoggingT $ filterLogger (\_ l -> l >= LevelError) $
   withSqlitePool (pack db) 10 $
     \pool -> liftIO $ parseArgs_ (Just pool) rs
-parseArgs args = runStderrLoggingT $
+parseArgs args = runStderrLoggingT $ filterLogger (\_ l -> l >= LevelError) $
   withSqlitePool "test.db3" 10 $
     \pool -> liftIO $ parseArgs_ (Just pool) args
 
@@ -59,10 +59,19 @@ parseArgs_ (Just pool) ("verse" : t : content : file) = do
       error $ "unexpected arguments: \"" ++ unwords extra ++ "\""
 parseArgs_ _ ["hash", path] = do
   BS.readFile path >>= TIO.putStrLn . hash
+parseArgs_ (Just pool) ["update", "verse", v] = do
+  putStrLn $ "updating " ++ show v ++ "..."
+  let verseKey :: Key Verse = toSqlKey $ read v
+  v' <-
+    runSql pool (get verseKey)
+      >>= maybe (error "Verse not found") return
+  runSql pool (verseChainUpdate v')
+    >>= maybe (putStrLn "Up to date") (runSql pool >=> print)
 parseArgs_ (Just pool) ["upload", t, path] = upload defaultRoot pool t path >>= print
 parseArgs_ _ _ = do
   putStrLn "usage: manager [--db <db>]"
   putStrLn "\tverse ..."
+  putStrLn "\tupdate <verse> ..."
   putStrLn "\tupload ..."
   putStrLn "\thash ..."
 
@@ -82,8 +91,8 @@ getUpdateFunc ::
   Pool SqlBackend ->
   Text ->
   IO ((UTCTime -> VCRootId -> a) -> ReaderT backend m (Key a))
-getUpdateFunc titleField pool t = do
-  parent <- runSql pool $ selectFirst [titleField ==. t] []
+getUpdateFunc titleF pool t = do
+  parent <- runSql pool $ selectFirst [titleF ==. t] []
   case parent of
     Nothing -> return newEntry
     Just p -> do

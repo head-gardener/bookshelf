@@ -19,13 +19,6 @@ class (HasTitle a) => Drawable a where
   drawSummary :: a -> Widget
   drawSummary = drawContent
 
--- Is this a good idea?
-instance Drawable a => Drawable (Entity a) where
-  timestamp = timestamp . entityVal
-  route = route
-  drawContent = drawContent . entityVal
-  drawSummary = drawSummary . entityVal
-
 draw :: Drawable a => Format -> a -> Widget
 draw f a =
   [whamlet|
@@ -46,8 +39,8 @@ reference :: Drawable a => Entity a -> Widget
 reference a =
   [whamlet|
     <h3>
-      <a href=@{route a}>#{title a}
-    ^{drawSummary a}
+      <a href=@{route a}>#{title $ entityVal a}
+    ^{drawSummary $ entityVal a}
   |]
 
 instance Drawable Verse where

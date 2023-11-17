@@ -37,6 +37,7 @@ library:
   generated-other-modules: Paths_bookshelf
   dependencies:
     - utf8-string
+    - transformers
     - magic
     - cityhash
     - base64-bytestring
@@ -65,9 +66,9 @@ executables:
     generated-other-modules: Paths_bookshelf
     dependencies:
       - bookshelf
-      - directory
       - bytestring
       - resource-pool
+      - directory
     ghc-options:
       - -threaded
 
