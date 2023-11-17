@@ -81,4 +81,5 @@ tests:
       - QuickCheck
       - bookshelf
       - directory
+      - filepath
     build-tools: hspec-discover

@@ -6,7 +6,7 @@ import Control.Exception
 import Control.Monad.Reader
 import Data.ByteString.Lazy qualified as BL
 import System.Directory
-import System.FilePath ((</>))
+import System.FilePath ((</>), takeFileName)
 import System.Storage
 
 type Native = ReaderT FilePath IO
@@ -27,7 +27,7 @@ instance StorageMonad Native where
 
   expandPath p = do
     r <- ask
-    return $ r </> p
+    return $ r </> takeFileName p
 
 instance StorageExport Native where
   exportPath p = do
