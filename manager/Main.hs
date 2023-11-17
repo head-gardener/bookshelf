@@ -2,22 +2,23 @@ module Main where
 
 import Control.Monad (join)
 import Control.Monad.Logger
+import Control.Monad.Reader (ReaderT)
 import Control.Monad.Trans
-import Control.Monad.Trans.Resource (runResourceT, MonadUnliftIO)
+import Control.Monad.Trans.Resource (MonadUnliftIO, runResourceT)
 import Data.ByteString qualified as BS
 import Data.Entities as ES
 import Data.Int (Int64)
-import Data.Text (pack, unpack)
+import Data.Pool (Pool)
+import Data.Text (Text, pack, unpack)
 import Data.Text.IO qualified as TIO
+import Data.Time (UTCTime)
 import Database.Persist.Sqlite
 import System.Directory (doesPathExist)
 import System.Environment (getArgs)
 import System.Storage
 import System.Storage.Native
 import Text.Read (readMaybe)
-import Data.Pool (Pool)
 import UnliftIO.Resource (ResourceT)
-import Control.Monad.Reader (ReaderT)
 
 main :: IO ()
 main = getArgs >>= parseArgs
@@ -37,8 +38,10 @@ parseArgs_ :: Maybe (Pool SqlBackend) -> [String] -> IO ()
 parseArgs_ _ ("--db" : _ : _) = putStrLn "Duplicate db specfication"
 parseArgs_ (Just pool) ("verse" : t : content : file) = do
   putStrLn "adding verse..."
+  let t' = pack t
+  updateF <- getUpdateFunc VerseTitle pool t'
   print
-    =<< runSql pool . newEntry . Verse (pack t) (pack content)
+    =<< runSql pool . updateF . Verse t' (pack content)
     =<< parseFile file
   where
     parseFile :: [String] -> IO (Maybe FileId)
@@ -63,6 +66,31 @@ parseArgs_ _ _ = do
   putStrLn "\tupload ..."
   putStrLn "\thash ..."
 
+-- | Search for an entry with a similar title.
+-- If found, returns curried editEntry, or newEntry otherwise.
+getUpdateFunc ::
+  ( BaseBackend backend ~ SqlBackend,
+    PersistEntityBackend a ~ BaseBackend backend,
+    HasTimestamp a,
+    HasRoot a,
+    HasTitle a,
+    MonadIO m,
+    PersistEntity a,
+    PersistStoreWrite backend
+  ) =>
+  EntityField a Text ->
+  Pool SqlBackend ->
+  Text ->
+  IO ((UTCTime -> VCRootId -> a) -> ReaderT backend m (Key a))
+getUpdateFunc titleField pool t = do
+  parent <- runSql pool $ selectFirst [titleField ==. t] []
+  case parent of
+    Nothing -> return newEntry
+    Just p -> do
+      let p' = entityVal p
+      putStrLn $ "Previous version: " ++ show (time p')
+      return $ editEntry $ versionRoot p'
+
 fileIdNotFound :: Int64 -> String
 fileIdNotFound fid = "File #" ++ show fid ++ " not found"
 
@@ -82,9 +110,11 @@ cantDeduceFile f =
 upload :: FilePath -> Pool SqlBackend -> String -> FilePath -> IO (Key File)
 upload root pool t p = do
   putStrLn "uploading..."
+  let t' = pack t
+  updateF <- getUpdateFunc FileTitle pool t'
   runNativeStorage (newFile (pack t) p) root
     >>= either errorHandler return
-    >>= runSql pool . newEntry
+    >>= runSql pool . updateF
   where
     errorHandler NotOverwritng = error "File exists, not overwriting"
     errorHandler e = error $ "Unexpected error: " ++ show e

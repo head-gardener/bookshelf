@@ -1,4 +1,3 @@
-- update entry on title clash?
 - chain update functionality
 - lazy gitignore strip
 - list
