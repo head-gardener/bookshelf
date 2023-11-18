@@ -71,3 +71,10 @@ instance HasVersions Verse
 instance HasVersions File
 
 instance HasVersions Page
+
+-- Combo
+class (HasRoot a, HasTimestamp a, HasTitle a) => DBEntity a
+
+instance DBEntity Verse
+instance DBEntity File
+instance DBEntity Page

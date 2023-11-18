@@ -1,13 +1,15 @@
 module Main where
 
-import Control.Monad (join, (>=>))
+import Control.Monad (join, void, (>=>))
 import Control.Monad.Logger
 import Control.Monad.Reader (ReaderT)
 import Control.Monad.Trans
 import Control.Monad.Trans.Resource (MonadUnliftIO, runResourceT)
 import Data.ByteString qualified as BS
+import Data.ContentType qualified as CT
 import Data.Entities as ES
 import Data.Int (Int64)
+import Data.List (intercalate)
 import Data.Pool (Pool)
 import Data.Text (Text, pack, unpack)
 import Data.Text.IO qualified as TIO
@@ -27,12 +29,14 @@ defaultRoot :: FilePath
 defaultRoot = "/tmp/bookshelf"
 
 parseArgs :: [String] -> IO ()
-parseArgs ("--db" : db : rs) = runStderrLoggingT $ filterLogger (\_ l -> l >= LevelError) $
-  withSqlitePool (pack db) 10 $
-    \pool -> liftIO $ parseArgs_ (Just pool) rs
-parseArgs args = runStderrLoggingT $ filterLogger (\_ l -> l >= LevelError) $
-  withSqlitePool "test.db3" 10 $
-    \pool -> liftIO $ parseArgs_ (Just pool) args
+parseArgs ("--db" : db : rs) = runStderrLoggingT $
+  filterLogger (\_ l -> l >= LevelError) $
+    withSqlitePool (pack db) 10 $
+      \pool -> liftIO $ parseArgs_ (Just pool) rs
+parseArgs args = runStderrLoggingT $
+  filterLogger (\_ l -> l >= LevelError) $
+    withSqlitePool "test.db3" 10 $
+      \pool -> liftIO $ parseArgs_ (Just pool) args
 
 parseArgs_ :: Maybe (Pool SqlBackend) -> [String] -> IO ()
 parseArgs_ _ ("--db" : _ : _) = putStrLn "Duplicate db specfication"
@@ -67,13 +71,49 @@ parseArgs_ (Just pool) ["update", "verse", v] = do
       >>= maybe (error "Verse not found") return
   runSql pool (verseChainUpdate v')
     >>= maybe (putStrLn "Up to date") (runSql pool >=> print)
-parseArgs_ (Just pool) ["upload", t, path] = upload defaultRoot pool t path >>= print
+parseArgs_ (Just pool) ["upload", t, path] =
+  upload defaultRoot pool t path >>= print
+parseArgs_ (Just pool) ("list" : "verses" : _) = outputAll pool ([] :: [Verse])
+parseArgs_ (Just pool) ("list" : "files" : _) = outputAll pool ([] :: [File])
+parseArgs_ (Just pool) ("list" : "pages" : _) = outputAll pool ([] :: [Page])
 parseArgs_ _ _ = do
   putStrLn "usage: manager [--db <db>]"
   putStrLn "\tverse ..."
   putStrLn "\tupdate <verse> ..."
+  putStrLn "\tlist <verse|file|page> ..."
   putStrLn "\tupload ..."
   putStrLn "\thash ..."
+
+class (DBEntity a, ToBackendKey SqlBackend a) => Output a where
+  output :: Entity a -> IO ()
+  output a = do
+    let a' = entityVal a
+    putStrLn $
+      intercalate
+        " - "
+        [unpack $ title a', show $ fromSqlKey $ entityKey a, show $ time a']
+    putStrLn $ "root: " ++ show (fromSqlKey $ versionRoot a')
+    outputContent a'
+
+  outputAll :: (Output a) => Pool SqlBackend -> [a] -> IO ()
+  outputAll pool _ = do
+    vs :: [Entity a] <- runSql pool $ selectList [] [Desc timeField]
+    mapM_ ((>> putStrLn "") . output) vs
+
+  outputContent :: a -> IO ()
+
+instance Output Verse where
+  outputContent v = do
+    mapM_ (putStrLn . ("attachment: " ++) . show . fromSqlKey) $ verseFile v
+    mapM_ putStrLn $ take 5 $ lines $ unpack $ verseContent v
+
+instance Output File where
+  outputContent f = do
+    putStrLn $ CT.unpack (fileType f) ++ ", " ++ unpack (fileName f)
+
+instance Output Page where
+  outputContent p = do
+    mapM_ (putStrLn . ("verse " ++) . show . fromSqlKey) $ pageVerses p
 
 -- | Search for an entry with a similar title.
 -- If found, returns curried editEntry, or newEntry otherwise.

@@ -3,7 +3,6 @@ module Render where
 import Data.ContentType as CT
 import Data.Entities as ES
 import Data.Text qualified as T
-import Data.Time
 import Foundation
 import Yesod
 import System.Storage qualified as ST
@@ -12,8 +11,7 @@ import Data.ByteString.Lazy.Char8 qualified as BL
 data Format = Timestamped | Minimal
   deriving (Show, Eq)
 
-class (HasTitle a) => Drawable a where
-  timestamp :: a -> UTCTime
+class (DBEntity a) => Drawable a where
   route :: Entity a -> Route BookShelf
   drawContent :: a -> Widget
   drawSummary :: a -> Widget
@@ -24,7 +22,7 @@ draw f a =
   [whamlet|
     <h3>#{title a}
     $if f == Timestamped
-      <p>#{show $ timestamp a}
+      <p>#{show $ time a}
     ^{drawContent a}
   |]
 
@@ -44,7 +42,6 @@ reference a =
   |]
 
 instance Drawable Verse where
-  timestamp = verseTime
   route = VerseR . entityKey
   drawContent v = do
     -- TODO: this sucks
@@ -61,7 +58,6 @@ instance Drawable Verse where
   |]
 
 instance Drawable Page where
-  timestamp = pageTime
   route = PageR . entityKey
   drawContent p = do
     verses <- liftHandler $ mapM (runDB . get404) $ pageVerses p
@@ -74,7 +70,6 @@ instance Drawable Page where
     |]
 
 instance Drawable File where
-  timestamp = fileTime
   route = FileR . entityKey
   drawContent f = do
     case fileType f of

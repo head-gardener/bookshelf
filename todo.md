@@ -1,4 +1,4 @@
 - add pages
+- migrate manager to some arg parser lib
 - chain update pages
 - lazy gitignore strip
-- list
