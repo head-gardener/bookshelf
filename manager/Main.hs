@@ -1,17 +1,13 @@
 module Main where
 
-import Control.Monad (join, void, (>=>))
+import Control.Monad (join)
 import Control.Monad.Logger
 import Control.Monad.Reader (ReaderT)
 import Control.Monad.Trans
 import Control.Monad.Trans.Resource (MonadUnliftIO, runResourceT)
 import Data.ByteString qualified as BS
-import Data.ContentType qualified as CT
 import Data.Entities as ES
-import Data.Int (Int64)
-import Data.List (intercalate)
-import Data.Pool (Pool)
-import Data.Text (Text, pack, unpack)
+import Data.Text (Text, pack)
 import Data.Text.IO qualified as TIO
 import Data.Time (UTCTime)
 import Database.Persist.Sqlite
@@ -21,6 +17,8 @@ import System.Storage
 import System.Storage.Native
 import Text.Read (readMaybe)
 import UnliftIO.Resource (ResourceT)
+import Output
+import Messages
 
 main :: IO ()
 main = getArgs >>= parseArgs
@@ -29,54 +27,57 @@ defaultRoot :: FilePath
 defaultRoot = "/tmp/bookshelf"
 
 parseArgs :: [String] -> IO ()
-parseArgs ("--db" : db : rs) = runStderrLoggingT $
-  filterLogger (\_ l -> l >= LevelError) $
-    withSqlitePool (pack db) 10 $
-      \pool -> liftIO $ parseArgs_ (Just pool) rs
-parseArgs args = runStderrLoggingT $
-  filterLogger (\_ l -> l >= LevelError) $
-    withSqlitePool "test.db3" 10 $
-      \pool -> liftIO $ parseArgs_ (Just pool) args
+parseArgs ("--db" : db : args) = runSql db $ parseArgs_ args
+parseArgs args = runSql "test.db3" $ parseArgs_ args
 
-parseArgs_ :: Maybe (Pool SqlBackend) -> [String] -> IO ()
-parseArgs_ _ ("--db" : _ : _) = putStrLn "Duplicate db specfication"
-parseArgs_ (Just pool) ("verse" : t : content : file) = do
-  putStrLn "adding verse..."
+runSql :: MonadUnliftIO m => String -> ReaderT SqlBackend (ResourceT (LoggingT m)) a -> m a
+runSql db f =
+  runStderrLoggingT $
+    filterLogger (\_ l -> l >= LevelError) $
+      withSqlitePool (pack db) 10 $
+        \pool ->
+          runResourceT $
+            flip runSqlPool pool $
+              runMigration migrateAll >> f
+
+parseArgs_ :: (MonadUnliftIO m) => [String] -> ReaderT SqlBackend (ResourceT m) ()
+parseArgs_ ("--db" : _ : _) = liftIO $ putStrLn "Duplicate db specfication"
+parseArgs_ ("verse" : t : content : file) = do
+  liftIO $ putStrLn "adding verse..."
   let t' = pack t
-  updateF <- getUpdateFunc VerseTitle pool t'
-  print
-    =<< runSql pool . updateF . Verse t' (pack content)
+  updateF <- getUpdateFunc VerseTitle t'
+  liftIO . print
+    =<< updateF . Verse t' (pack content)
     =<< parseFile file
   where
-    parseFile :: [String] -> IO (Maybe FileId)
     parseFile [f] = do
-      isFile <- doesPathExist f
+      isFile <- liftIO $ doesPathExist f
       let fileKeyM = toSqlKey <$> readMaybe f
-      fileEntM <- join <$> mapM (runSql pool . get) fileKeyM
+      fileEntM <- join <$> mapM get fileKeyM
       case (isFile, fileKeyM, fileEntM) of
-        (True, _, _) -> Just <$> upload defaultRoot pool t f
-        (_, Just fid, Just fent) -> putStrLn (linkingWith fent) >> return (Just fid)
+        (True, _, _) -> Just <$> upload defaultRoot t f
+        (_, Just fid, Just fent) ->
+          liftIO (putStrLn (linkingWith fent))
+            >> return (Just fid)
         (_, Just fid, Nothing) -> error $ fileIdNotFound $ fromSqlKey fid
         _ -> error $ cantDeduceFile f
     parseFile [] = return Nothing
     parseFile (_ : extra) =
       error $ "unexpected arguments: \"" ++ unwords extra ++ "\""
-parseArgs_ _ ["hash", path] = do
-  BS.readFile path >>= TIO.putStrLn . hash
-parseArgs_ (Just pool) ["update", "verse", v] = do
-  putStrLn $ "updating " ++ show v ++ "..."
+parseArgs_ ["hash", path] =
+  liftIO $ BS.readFile path >>= TIO.putStrLn . hash
+parseArgs_ ["update", "verse", v] = do
+  liftIO $ putStrLn $ "updating " ++ show v ++ "..."
   let verseKey :: Key Verse = toSqlKey $ read v
-  v' <-
-    runSql pool (get verseKey)
-      >>= maybe (error "Verse not found") return
-  runSql pool (verseChainUpdate v')
-    >>= maybe (putStrLn "Up to date") (runSql pool >=> print)
-parseArgs_ (Just pool) ["upload", t, path] =
-  upload defaultRoot pool t path >>= print
-parseArgs_ (Just pool) ("list" : "verses" : _) = outputAll pool ([] :: [Verse])
-parseArgs_ (Just pool) ("list" : "files" : _) = outputAll pool ([] :: [File])
-parseArgs_ (Just pool) ("list" : "pages" : _) = outputAll pool ([] :: [Page])
-parseArgs_ _ _ = do
+  v' <- get verseKey >>= maybe (error "Verse not found") return
+  verseChainUpdate v'
+    >>= maybe (liftIO $ putStrLn "Up to date") (>>= liftIO . print)
+parseArgs_ ["upload", t, path] =
+  upload defaultRoot t path >>= liftIO . print
+parseArgs_ ("list" : "verses" : _) = outputAll ([] :: [Verse])
+parseArgs_ ("list" : "files" : _) = outputAll ([] :: [File])
+parseArgs_ ("list" : "pages" : _) = outputAll ([] :: [Page])
+parseArgs_ _ = liftIO $ do
   putStrLn "usage: manager [--db <db>]"
   putStrLn "\tverse ..."
   putStrLn "\tupdate <verse> ..."
@@ -84,92 +85,37 @@ parseArgs_ _ _ = do
   putStrLn "\tupload ..."
   putStrLn "\thash ..."
 
-class (DBEntity a, ToBackendKey SqlBackend a) => Output a where
-  output :: Entity a -> IO ()
-  output a = do
-    let a' = entityVal a
-    putStrLn $
-      intercalate
-        " - "
-        [unpack $ title a', show $ fromSqlKey $ entityKey a, show $ time a']
-    putStrLn $ "root: " ++ show (fromSqlKey $ versionRoot a')
-    outputContent a'
-
-  outputAll :: (Output a) => Pool SqlBackend -> [a] -> IO ()
-  outputAll pool _ = do
-    vs :: [Entity a] <- runSql pool $ selectList [] [Desc timeField]
-    mapM_ ((>> putStrLn "") . output) vs
-
-  outputContent :: a -> IO ()
-
-instance Output Verse where
-  outputContent v = do
-    mapM_ (putStrLn . ("attachment: " ++) . show . fromSqlKey) $ verseFile v
-    mapM_ putStrLn $ take 5 $ lines $ unpack $ verseContent v
-
-instance Output File where
-  outputContent f = do
-    putStrLn $ CT.unpack (fileType f) ++ ", " ++ unpack (fileName f)
-
-instance Output Page where
-  outputContent p = do
-    mapM_ (putStrLn . ("verse " ++) . show . fromSqlKey) $ pageVerses p
-
 -- | Search for an entry with a similar title.
 -- If found, returns curried editEntry, or newEntry otherwise.
 getUpdateFunc ::
-  ( BaseBackend backend ~ SqlBackend,
-    PersistEntityBackend a ~ BaseBackend backend,
-    HasTimestamp a,
+  ( HasTimestamp a,
     HasRoot a,
     HasTitle a,
     MonadIO m,
     PersistEntity a,
-    PersistStoreWrite backend
+    PersistEntityBackend a ~ SqlBackend
   ) =>
   EntityField a Text ->
-  Pool SqlBackend ->
   Text ->
-  IO ((UTCTime -> VCRootId -> a) -> ReaderT backend m (Key a))
-getUpdateFunc titleF pool t = do
-  parent <- runSql pool $ selectFirst [titleF ==. t] []
+  ReaderT SqlBackend m ((UTCTime -> VCRootId -> a) -> ReaderT SqlBackend m (Key a))
+getUpdateFunc titleF t = do
+  parent <- selectFirst [titleF ==. t] []
   case parent of
     Nothing -> return newEntry
     Just p -> do
       let p' = entityVal p
-      putStrLn $ "Previous version: " ++ show (time p')
+      liftIO $ putStrLn $ "Previous version: " ++ show (time p')
       return $ editEntry $ versionRoot p'
 
-fileIdNotFound :: Int64 -> String
-fileIdNotFound fid = "File #" ++ show fid ++ " not found"
-
-linkingWith :: File -> String
-linkingWith f =
-  "Linking with \""
-    ++ unpack (fileTitle f)
-    ++ "\", "
-    ++ show (fileTime f)
-
-cantDeduceFile :: String -> String
-cantDeduceFile f =
-  "Couldn't deduce file from \""
-    ++ f
-    ++ "\" - not a path, nor a file id"
-
-upload :: FilePath -> Pool SqlBackend -> String -> FilePath -> IO (Key File)
-upload root pool t p = do
-  putStrLn "uploading..."
+upload :: (MonadIO m) => FilePath -> String -> FilePath -> ReaderT SqlBackend (ResourceT m) (Key File)
+upload root t p = do
+  liftIO $ putStrLn "uploading..."
   let t' = pack t
-  updateF <- getUpdateFunc FileTitle pool t'
-  runNativeStorage (newFile (pack t) p) root
-    >>= either errorHandler return
-    >>= runSql pool . updateF
+  updateF <- getUpdateFunc FileTitle t'
+  f <-
+    liftIO (runNativeStorage (newFile (pack t) p) root)
+      >>= either errorHandler return
+  updateF f
   where
     errorHandler NotOverwritng = error "File exists, not overwriting"
     errorHandler e = error $ "Unexpected error: " ++ show e
-
-runSql :: MonadUnliftIO m => Pool SqlBackend -> ReaderT SqlBackend (ResourceT m) a -> m a
-runSql pool f =
-  runResourceT $
-    flip runSqlPool pool $
-      runMigration migrateAll >> f

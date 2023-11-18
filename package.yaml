@@ -67,7 +67,6 @@ executables:
     dependencies:
       - bookshelf
       - bytestring
-      - resource-pool
       - directory
     ghc-options:
       - -threaded
