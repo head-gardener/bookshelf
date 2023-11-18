@@ -5,6 +5,7 @@ module Data.Entities
     module Data.Entities.Lenses,
     module Data.Entities.Storage,
     verseChainUpdate,
+    pageChainUpdate,
   )
 where
 
@@ -50,8 +51,20 @@ verseChainUpdate ::
   Verse ->
   ReaderT SqlBackend m (Maybe (ReaderT SqlBackend m (Key Verse)))
 verseChainUpdate v = runMaybeT $ do
-  fileId <- MaybeT $ return $ verseFile v
+  Just fileId <- return $ verseFile v
   file <- MaybeT $ get fileId
   lastV <- fmap entityKey $ MaybeT $ lastVersion file
   guard $ lastV /= fileId
   return $ editEntry (versionRoot v) $ Verse (title v) (verseContent v) (Just lastV)
+
+pageChainUpdate ::
+  (MonadIO m) =>
+  Page ->
+  ReaderT SqlBackend m (Maybe (ReaderT SqlBackend m (Key Page)))
+pageChainUpdate p = runMaybeT $ do
+  let vs = pageVerses p
+  verses <- MaybeT $ sequence <$> mapM get vs
+  updated <- fmap entityKey <$> MaybeT (sequence <$> mapM lastVersion verses)
+  guard $ not $ null verses
+  guard $ vs /= updated
+  return $ editEntry (versionRoot p) $ Page (title p) updated

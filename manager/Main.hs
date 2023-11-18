@@ -1,6 +1,6 @@
 module Main where
 
-import Control.Monad (join)
+import Control.Monad (forM, join)
 import Control.Monad.Logger
 import Control.Monad.Reader (ReaderT)
 import Control.Monad.Trans
@@ -11,14 +11,14 @@ import Data.Text (Text, pack)
 import Data.Text.IO qualified as TIO
 import Data.Time (UTCTime)
 import Database.Persist.Sqlite
+import Messages
+import Output
 import System.Directory (doesPathExist)
 import System.Environment (getArgs)
 import System.Storage
 import System.Storage.Native
 import Text.Read (readMaybe)
 import UnliftIO.Resource (ResourceT)
-import Output
-import Messages
 
 main :: IO ()
 main = getArgs >>= parseArgs
@@ -31,66 +31,77 @@ parseArgs ("--db" : db : args) = runSql db $ parseArgs_ args
 parseArgs args = runSql "test.db3" $ parseArgs_ args
 
 runSql :: MonadUnliftIO m => String -> ReaderT SqlBackend (ResourceT (LoggingT m)) a -> m a
-runSql db f =
-  runStderrLoggingT $
-    filterLogger (\_ l -> l >= LevelError) $
-      withSqlitePool (pack db) 10 $
-        \pool ->
-          runResourceT $
-            flip runSqlPool pool $
-              runMigration migrateAll >> f
+runSql db f = runStderrLoggingT $
+  filterLogger (\_ l -> l >= LevelError) $
+    withSqlitePool (pack db) 10 $ \pool ->
+      runResourceT (flip runSqlPool pool $ runMigration migrateAll >> f)
 
 parseArgs_ :: (MonadUnliftIO m) => [String] -> ReaderT SqlBackend (ResourceT m) ()
 parseArgs_ ("--db" : _ : _) = liftIO $ putStrLn "Duplicate db specfication"
 parseArgs_ ("verse" : t : content : file) = do
-  liftIO $ putStrLn "adding verse..."
   let t' = pack t
   updateF <- getUpdateFunc VerseTitle t'
   liftIO . print
     =<< updateF . Verse t' (pack content)
-    =<< parseFile file
-  where
-    parseFile [f] = do
-      isFile <- liftIO $ doesPathExist f
-      let fileKeyM = toSqlKey <$> readMaybe f
-      fileEntM <- join <$> mapM get fileKeyM
-      case (isFile, fileKeyM, fileEntM) of
-        (True, _, _) -> Just <$> upload defaultRoot t f
-        (_, Just fid, Just fent) ->
-          liftIO (putStrLn (linkingWith fent))
-            >> return (Just fid)
-        (_, Just fid, Nothing) -> error $ fileIdNotFound $ fromSqlKey fid
-        _ -> error $ cantDeduceFile f
-    parseFile [] = return Nothing
-    parseFile (_ : extra) =
-      error $ "unexpected arguments: \"" ++ unwords extra ++ "\""
+    =<< parseFile t file
 parseArgs_ ["hash", path] =
   liftIO $ BS.readFile path >>= TIO.putStrLn . hash
 parseArgs_ ["update", "verse", v] = do
-  liftIO $ putStrLn $ "updating " ++ show v ++ "..."
-  let verseKey :: Key Verse = toSqlKey $ read v
+  let verseKey = toSqlKey $ read v
   v' <- get verseKey >>= maybe (error "Verse not found") return
   verseChainUpdate v'
+    >>= maybe (liftIO $ putStrLn "Up to date") (>>= liftIO . print)
+parseArgs_ ["update", "page", p] = do
+  let pageKey = toSqlKey $ read p
+  p' <- get pageKey >>= maybe (error "Page not found") return
+  pageChainUpdate p'
     >>= maybe (liftIO $ putStrLn "Up to date") (>>= liftIO . print)
 parseArgs_ ["upload", t, path] =
   upload defaultRoot t path >>= liftIO . print
 parseArgs_ ("list" : "verses" : _) = outputAll ([] :: [Verse])
 parseArgs_ ("list" : "files" : _) = outputAll ([] :: [File])
 parseArgs_ ("list" : "pages" : _) = outputAll ([] :: [Page])
+parseArgs_ ("page" : t : vs) = do
+  let vsM :: [Maybe (Key Verse)] = fmap ((toSqlKey <$>) . readMaybe) vs
+  vs' <- forM (zip vsM vs) $
+    \(v, s) -> maybe (error $ s ++ " should be a verse id") return v
+  maybe (error "A verse key not on db!") (const $ return ()) . sequence
+    =<< forM vs' get
+  f <- getUpdateFunc PageTitle $ pack t
+  liftIO . print =<< f (Page (pack t) vs')
 parseArgs_ _ = liftIO $ do
   putStrLn "usage: manager [--db <db>]"
+  putStrLn "\tpage ..."
   putStrLn "\tverse ..."
   putStrLn "\tupdate <verse> ..."
   putStrLn "\tlist <verse|file|page> ..."
   putStrLn "\tupload ..."
   putStrLn "\thash ..."
 
+parseFile ::
+  MonadIO m =>
+  String ->
+  [FilePath] ->
+  ReaderT SqlBackend m (Maybe (Key File))
+parseFile t [f] = do
+  isFile <- liftIO $ doesPathExist f
+  let fileKeyM = toSqlKey <$> readMaybe f
+  fileEntM <- join <$> mapM get fileKeyM
+  case (isFile, fileKeyM, fileEntM) of
+    (True, _, _) -> Just <$> upload defaultRoot t f
+    (_, Just fid, Just fent) ->
+      liftIO (putStrLn (linkingWith fent))
+        >> return (Just fid)
+    (_, Just fid, Nothing) -> error $ fileIdNotFound $ fromSqlKey fid
+    _ -> error $ cantDeduceFile f
+parseFile _ [] = return Nothing
+parseFile _ (_ : extra) =
+  error $ "unexpected arguments: \"" ++ unwords extra ++ "\""
+
 -- | Search for an entry with a similar title.
 -- If found, returns curried editEntry, or newEntry otherwise.
 getUpdateFunc ::
-  ( HasTimestamp a,
-    HasRoot a,
-    HasTitle a,
+  ( DBEntity a,
     MonadIO m,
     PersistEntity a,
     PersistEntityBackend a ~ SqlBackend
@@ -107,7 +118,12 @@ getUpdateFunc titleF t = do
       liftIO $ putStrLn $ "Previous version: " ++ show (time p')
       return $ editEntry $ versionRoot p'
 
-upload :: (MonadIO m) => FilePath -> String -> FilePath -> ReaderT SqlBackend (ResourceT m) (Key File)
+upload ::
+  (MonadIO m) =>
+  FilePath ->
+  String ->
+  FilePath ->
+  ReaderT SqlBackend m (Key File)
 upload root t p = do
   liftIO $ putStrLn "uploading..."
   let t' = pack t
