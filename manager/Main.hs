@@ -1,4 +1,4 @@
-module Main where
+module Main (main) where
 
 import Control.Monad (forM, join)
 import Control.Monad.Logger
@@ -37,7 +37,7 @@ runSql db f = runStderrLoggingT $
       runResourceT (flip runSqlPool pool $ runMigration migrateAll >> f)
 
 parseArgs_ :: (MonadUnliftIO m) => [String] -> ReaderT SqlBackend (ResourceT m) ()
-parseArgs_ ("--db" : _ : _) = liftIO $ putStrLn "Duplicate db specfication"
+parseArgs_ ("--db" : _ : _) = liftIO $ putStrLn "Unexpected --db argument"
 parseArgs_ ("verse" : t : content : file) = do
   let t' = pack t
   updateF <- getUpdateFunc VerseTitle t'
@@ -58,9 +58,12 @@ parseArgs_ ["update", "page", p] = do
     >>= maybe (liftIO $ putStrLn "Up to date") (>>= liftIO . print)
 parseArgs_ ["upload", t, path] =
   upload defaultRoot t path >>= liftIO . print
-parseArgs_ ("list" : "verses" : _) = outputAll ([] :: [Verse])
-parseArgs_ ("list" : "files" : _) = outputAll ([] :: [File])
-parseArgs_ ("list" : "pages" : _) = outputAll ([] :: [Page])
+parseArgs_ ("list" : "verses" : fs) =
+  outputAll =<< liftIO (parseFilters fs :: IO [Filter Verse])
+parseArgs_ ("list" : "pages" : fs) =
+  outputAll =<< liftIO (parseFilters fs :: IO [Filter Page])
+parseArgs_ ("list" : "files" : fs) =
+  outputAll =<< liftIO (parseFilters fs :: IO [Filter File])
 parseArgs_ ("page" : t : vs) = do
   let vsM :: [Maybe (Key Verse)] = fmap ((toSqlKey <$>) . readMaybe) vs
   vs' <- forM (zip vsM vs) $
@@ -77,6 +80,13 @@ parseArgs_ _ = liftIO $ do
   putStrLn "\tlist <verse|file|page> ..."
   putStrLn "\tupload ..."
   putStrLn "\thash ..."
+
+-- is this lazy?
+parseFilters :: DBEntity a => [String] -> IO [Filter a]
+parseFilters ("title" : t : fs) = ((titleField ==. pack t) :) <$> parseFilters fs
+parseFilters ("root" : r : fs) = ((rootField ==. toSqlKey (read r)) :) <$> parseFilters fs
+parseFilters (f : _) = error $ "Invalid filter: " ++ f
+parseFilters [] = return []
 
 parseFile ::
   MonadIO m =>

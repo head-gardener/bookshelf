@@ -1,11 +1,11 @@
 module Output where
 
 import Control.Monad.Reader
-import Data.Entities
-import Database.Persist.Sql
 import Data.ContentType qualified as CT
-import Data.Text (unpack)
+import Data.Entities
 import Data.List (intercalate)
+import Data.Text (unpack)
+import Database.Persist.Sql
 
 class (DBEntity a, ToBackendKey SqlBackend a) => Output a where
   output :: Entity a -> IO ()
@@ -18,9 +18,9 @@ class (DBEntity a, ToBackendKey SqlBackend a) => Output a where
     putStrLn $ "root: " ++ show (fromSqlKey $ versionRoot a')
     outputContent a'
 
-  outputAll :: (MonadIO m, Output a) => [a] -> ReaderT SqlBackend m ()
-  outputAll _ = do
-    vs :: [Entity a] <- selectList [] [Desc timeField]
+  outputAll :: (MonadIO m, Output a) => [Filter a] -> ReaderT SqlBackend m ()
+  outputAll fs = do
+    vs :: [Entity a] <- selectList fs [Desc timeField]
     liftIO $ mapM_ ((>> putStrLn "") . output) vs
 
   outputContent :: a -> IO ()
