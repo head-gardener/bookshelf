@@ -27,6 +27,8 @@ defaultRoot :: FilePath
 defaultRoot = "/tmp/bookshelf"
 
 parseArgs :: [String] -> IO ()
+parseArgs ("--help": _) = usage
+parseArgs ("-h": _) = usage
 parseArgs ("--db" : db : args) = runSql db $ parseArgs_ args
 parseArgs args = runSql "test.db3" $ parseArgs_ args
 
@@ -38,6 +40,14 @@ runSql db f = runStderrLoggingT $
 
 parseArgs_ :: (MonadUnliftIO m) => [String] -> ReaderT SqlBackend (ResourceT m) ()
 parseArgs_ ("--db" : _ : _) = liftIO $ putStrLn "Unexpected --db argument"
+parseArgs_ ("page" : t : vs) = do
+  let vsM :: [Maybe (Key Verse)] = fmap ((toSqlKey <$>) . readMaybe) vs
+  vs' <- forM (zip vsM vs) $
+    \(v, s) -> maybe (error $ s ++ " should be a verse id") return v
+  maybe (error "A verse key not on db!") (const $ return ()) . sequence
+    =<< forM vs' get
+  f <- getUpdateFunc PageTitle $ pack t
+  liftIO . print =<< f (Page (pack t) vs')
 parseArgs_ ("verse" : t : content : file) = do
   let t' = pack t
   updateF <- getUpdateFunc VerseTitle t'
@@ -64,22 +74,7 @@ parseArgs_ ("list" : "pages" : fs) =
   outputAll =<< liftIO (parseFilters fs :: IO [Filter Page])
 parseArgs_ ("list" : "files" : fs) =
   outputAll =<< liftIO (parseFilters fs :: IO [Filter File])
-parseArgs_ ("page" : t : vs) = do
-  let vsM :: [Maybe (Key Verse)] = fmap ((toSqlKey <$>) . readMaybe) vs
-  vs' <- forM (zip vsM vs) $
-    \(v, s) -> maybe (error $ s ++ " should be a verse id") return v
-  maybe (error "A verse key not on db!") (const $ return ()) . sequence
-    =<< forM vs' get
-  f <- getUpdateFunc PageTitle $ pack t
-  liftIO . print =<< f (Page (pack t) vs')
-parseArgs_ _ = liftIO $ do
-  putStrLn "usage: manager [--db <db>]"
-  putStrLn "\tpage ..."
-  putStrLn "\tverse ..."
-  putStrLn "\tupdate <verse> ..."
-  putStrLn "\tlist <verse|file|page> ..."
-  putStrLn "\tupload ..."
-  putStrLn "\thash ..."
+parseArgs_ _ = liftIO usage
 
 -- is this lazy?
 parseFilters :: DBEntity a => [String] -> IO [Filter a]

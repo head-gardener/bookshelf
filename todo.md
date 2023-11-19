@@ -1,3 +1,2 @@
 - migrate manager to some arg parser lib
 - lazy gitignore strip
-- list filters
