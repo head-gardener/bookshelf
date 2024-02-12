@@ -21,6 +21,7 @@ import Database.Persist.Sql
 newEntry ::
   ( MonadIO m,
     HasTitle a,
+    SafeToInsert a,
     PersistRecordBackend a backend,
     PersistRecordBackend VCRoot backend,
     PersistStoreWrite backend
@@ -35,6 +36,7 @@ newEntry f = do
 editEntry ::
   ( MonadIO m,
     HasTitle a,
+    SafeToInsert a,
     PersistRecordBackend a backend,
     PersistRecordBackend VCRoot backend,
     PersistStoreWrite backend

@@ -108,6 +108,7 @@ parseFile _ (_ : extra) =
 getUpdateFunc ::
   ( DBEntity a,
     MonadIO m,
+    SafeToInsert a,
     PersistEntity a,
     PersistEntityBackend a ~ SqlBackend
   ) =>
